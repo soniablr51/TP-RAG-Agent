@@ -68,3 +68,17 @@ RAG-Agent-TP/
 - **Recherche hybride** : BM25 + sémantique (30/70)
 - **LLM** : Llama 3.3 70B via Groq API
 - **Dataset** : TMDB 5000 Movies
+
+
+
+## Choix techniques (Questions de réflexion)
+
+**Q1 - Conversion CSV → texte** : Chaque film est converti en texte narratif combinant titre, année, genres, note et synopsis. Ce format permet à l'embedding de capturer le sens global du film.
+
+**Q2 - Extraction des genres** : La colonne `genres` est au format JSON imbriqué. J'utilise `json.loads()` pour parser et extraire uniquement les noms des genres.
+
+**Q3 - Persistance de l'index** : L'index FAISS et les métadonnées sont sauvegardés sur disque. `rag.py` les charge au démarrage sans relancer l'indexation.
+
+**Q4 - Prompt système** : Le LLM est contraint de citer titre, note et année pour chaque recommandation, et de signaler si l'information n'est pas dans le contexte.
+
+**Q5 - Films récents absents** : Le dataset date de 2017. Si un film récent est demandé, le LLM l'indique poliment plutôt que d'inventer.
