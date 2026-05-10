@@ -2,9 +2,11 @@ from dotenv import load_dotenv
 import os
 import faiss
 import json
-import numpy as np 
 from sentence_transformers import SentenceTransformer
 from groq import Groq
+from config import MODEL_NAME, TOP_K, INDEX_PATH
+from retriever import hybrid_search
+from agents.orchestrator import classify_query, handle_greeting, handle_help
 
 # Charger les variables du fichier .env
 load_dotenv()
@@ -20,57 +22,30 @@ else:
 
 client = Groq(api_key=api_key)
 
-    # On charge le modèle pour transformer la question en chiffres
-modele = SentenceTransformer("all-mpnet-base-v2")
+# On charge le modèle pour transformer la question en chiffres
+modele = SentenceTransformer(MODEL_NAME)
 
 # On charge l'index FAISS (les vecteurs des 5653 films)
-index = faiss.read_index("base_films.index")
+index = faiss.read_index(f"{INDEX_PATH}.index")
 
 # On charge les textes et métadonnées correspondantes
-with open("base_films.json", "r", encoding="utf-8") as f:
+with open(f"{INDEX_PATH}.json", "r", encoding="utf-8") as f:
     documents = json.load(f)
 
 
-def rechercher(question: str, modele, index, chunks_avec_meta: list, k: int = 4) -> list[dict]:
-    """
-    Recherche les k chunks les plus pertinents pour une question.
-    """
-    # 1. On transforme la question en vecteur (Embedding)
-    vecteur_question = modele.encode([question])
-    
-    # 2. Recherche dans FAISS (D = distances L2, I = index numériques)
-    D, I = index.search(vecteur_question, k)
-    
-    resultats = []
-    for i in range(len(I[0])):
-        idx = I[0][i]
-        score = D[0][i]
-        
-        # On récupère les données du film grâce à l'index retourné par FAISS
-        chunk = chunks_avec_meta[idx]
-        
-        resultats.append({
-            "contenu": chunk["contenu"],
-            "metadata": chunk["metadata"],
-            "score": float(score)
-        })
-        
-    return resultats
 
-
-
-
-   # --- ÉTAPE 6 : GÉNÉRATION AVEC GROQ ---
+# --- ÉTAPE 6 : GÉNÉRATION AVEC GROQ ---
 
 def construire_prompt_systeme() -> str:
     """Retourne le prompt système pour définir le comportement de l'IA."""
-    return """Tu es un assistant expert en cinéma. 
-    Ton rôle est d'aider l'utilisateur en te basant EXCLUSIVEMENT sur le contexte fourni.
-    
-    RÈGLES :
-    1. Si la réponse n'est pas dans le contexte, dis-le poliment. N'invente rien.
-    2. Cite toujours le titre des films que tu mentionnes.
-    3. Sois concis et amical."""
+    return """Tu es un assistant expert en cinéma.
+Ton rôle est d'aider l'utilisateur en te basant EXCLUSIVEMENT sur le contexte fourni.
+
+RÈGLES :
+ 1. Si la réponse n'est pas dans le contexte, dis-le poliment. N'invente rien.
+ 2. Cite toujours le titre du film, sa note /10 et son année de sortie.
+ 3. Sois concis et amical.
+ 4. Réponds toujours en français."""
 
 def generer_reponse(question: str, chunks_pertinents: list[dict]) -> str:
     """Assemble le contexte et appelle l'API Groq."""
@@ -113,12 +88,42 @@ def main():
         if not question:
             continue
 
+        intent = classify_query(question)
+        if intent == "greeting":
+            print(f"\n{'✨' + '-'*48}")
+            print(handle_greeting())
+            continue
+        if intent == "help":
+            print(f"\n{'✨' + '-'*48}")
+            print(handle_help())
+            continue
+
+
+        # Filtre de langue
+        filtre_langue = None
+        if question.upper().endswith(" FR"):
+            filtre_langue = "fr"
+            question = question[:-3].strip()
+        elif question.upper().endswith(" VO"):
+            filtre_langue = "en"
+            question = question[:-3].strip()
+
         print("🔍 Recherche en cours...")
         
         # 1. On cherche les films dans la base FAISS
-        resultats_recherche = rechercher(question, modele, index, documents)
+        resultats_recherche = hybrid_search(question, modele, index, documents)
 
-        print("🤖 L'IA prépare votre recommandation...")
+        # Appliquer le filtre de langue si demandé
+        if filtre_langue:
+            resultats_recherche = [
+                r for r in resultats_recherche
+                if r['metadata'].get('langue') == filtre_langue
+            ]
+            if not resultats_recherche:
+                print(f"Aucun film trouvé en langue '{filtre_langue}'.")
+                continue
+
+        print("L'IA prépare votre recommandation...")
         
         # 2. On génère la réponse rédigée
         reponse = generer_reponse(question, resultats_recherche)

@@ -1,9 +1,10 @@
 import pandas as pd
 import json
 import numpy as np
-from sentence_transformers import SentenceTransformer
 import faiss
-model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+import os
+from sentence_transformers import SentenceTransformer
+from config import MODEL_NAME, CHUNK_SIZE, CHUNK_OVERLAP, DATA_PATH, INDEX_PATH
 
 # --- 1. LES OUTILS ---
 def chunker(texte, taille_max=500, overlap=50):
@@ -21,7 +22,7 @@ def chunker(texte, taille_max=500, overlap=50):
     return chunks
 
 # --- 2. CHARGEMENT ---
-df = pd.read_csv("data/tmdb_5000_movies.csv")
+df = pd.read_csv(DATA_PATH)
 # On enlève les films sans résumé
 df = df.dropna(subset=['overview'])
 
@@ -42,7 +43,7 @@ for index, row in df.iterrows():
     texte_film = f"Titre: {row['title']}. Année: {str(row['release_date'])[:4]}. Genre: {genres_propres}. Note: {row['vote_average']}/10. Résumé: {row['overview']}"
    
     # On découpe ce texte en morceaux (chunks)
-    morceaux = chunker(texte_film, taille_max=500, overlap=50)
+    morceaux = chunker(texte_film, taille_max=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
 
     # Pour chaque morceau, on crée un document structuré
     for i, morceau in enumerate(morceaux):
@@ -64,7 +65,7 @@ print(f"✅ Terminé ! {len(documents)} morceaux de texte prêts pour l'IA.")
 # --- ÉTAPE 3 : CRÉATION DES EMBEDDINGS ---
 
 # 1. On charge le modèle (le cerveau)
-model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2") 
+model = SentenceTransformer(MODEL_NAME)
 
 # 2. On définit la fonction de transformation
 def embedder_chunks(chunks: list[str], modele) -> np.ndarray:
@@ -113,9 +114,8 @@ def charger_index(chemin: str):
 mon_index = creer_index_faiss(matrice_finale)
 
 # 2. On enregistre tout sous le nom "base_films"
-import os
 os.makedirs("index", exist_ok=True)
-sauvegarder_index(mon_index, documents, "index/base_films")
+sauvegarder_index(mon_index, documents, INDEX_PATH)
 
 print(f"💾 Étape 4 réussie ! Fichiers 'base_films.index' et 'base_films.json' créés.")
 print(f"✅ Nombre de vecteurs indexés : {mon_index.ntotal}")
