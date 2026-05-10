@@ -2,5 +2,7 @@
 venv/
 index/
 *.index
+*.json
 data/
 __pycache__/
+tmdb_5000_movies.csv
